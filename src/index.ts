@@ -25,8 +25,6 @@ const migrateEpics = async (jiraBoardId: string): Promise<Record<number, number>
     const allDoneAndOpenEpics = [...openEpics.values, ...doneEpics.values]
     const allEpics = allDoneAndOpenEpics.filter((epic: any) => validKeys.includes(epic.key.split('-')[0]))
 
-    console.log(openEpics)
-
     const listedMilestones = await octokit.rest.issues.listMilestones({
         owner: process.env.GITHUB_OWNER!,
         repo: process.env.GITHUB_REPO!,
@@ -46,12 +44,14 @@ const migrateEpics = async (jiraBoardId: string): Promise<Record<number, number>
     const epics = allEpics.filter((epic: any) => !(epic.id in githubEpicMap))
     console.log(epics)
     const epicMapping = await Promise.all(epics.map(async (epic) => {
+        const issueForEpic = await jira.getIssue(epic.key, ['description'])
+
         const result = await octokit.rest.issues.createMilestone({
             owner: process.env.GITHUB_OWNER!,
             repo: process.env.GITHUB_REPO!,
             title: epic.name,
             state: epic.done ? 'closed' : 'open',
-            description: epic.summary
+            description: issueForEpic.fields.description ?? epic.summary
         })
 
         return [epic.id, result.data.number]
@@ -67,15 +67,14 @@ const buildIssueBody = (issue: any) => {
     const linkedIssues = issue.fields.issuelinks.map((link: any) => {
         const relatedIssue = link.inwardIssue ?? link.outwardIssue ?? {}
         return `- ${link.type.name}: ${relatedIssue.key}`
-    }).join('/n')
+    }).join('\n')
     const environment = issue.fields.customfield_10604
     return `
 # ${creator} - ${createdAt.toLocaleString('de')}
 
 ${body}
 
-**Environment: ${environment ?? '-'}**
-
+**Environment**: ${environment ?? '-'}
 **Linked issues:**
 ${linkedIssues ?? '-'}
 `
@@ -95,8 +94,7 @@ const migrateIssues = async (jiraBoardId: string, epicMap: Record<number, number
     while (hasNext) {
         const result = await jira.getIssuesForBoard(jiraBoardId, startAt, maxResults, jql, true)
         await Promise.all(result.issues.map(async (issue: any, index: number) => {
-            if (issue.key ==='IGAPP-440') {console.log(issue)}
-            if (issue.fields.issuetype === 'Epic') { return }
+            if (issue.fields.issuetype.name === "Epic") { return }
             if (index > 10) { return }
             const createdIssue = await octokit.rest.issues.create({
                 owner: process.env.GITHUB_OWNER!,
@@ -104,7 +102,8 @@ const migrateIssues = async (jiraBoardId: string, epicMap: Record<number, number
                 title: issue.key + ': ' + issue.fields.summary,
                 body: buildIssueBody(issue),
                 milestone: issue.fields.epic ? epicMap[issue.fields.epic.id] : undefined,
-                labels: getLabelsForIssue(issue)
+                labels: getLabelsForIssue(issue),
+                // assignees: nameMapping[issue.fields.assignee.displayName] ?? undefined
             })
 
             if (issue.fields.comment && issue.fields.comment.total > 0) {
@@ -134,7 +133,7 @@ ${j2m.to_markdown(comment.body)}
         }))
 
         startAt = result.startAt + result.maxResults
-        hasNext = startAt < result.issues.total && false
+        hasNext = startAt < result.issues.total
     };
 }
 
