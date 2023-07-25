@@ -108,8 +108,8 @@ ${j2m.to_markdown(comment.body)}
 
 const migrateIssues = async (jira: JiraApi, octokit: Octokit, jiraBoardId: string, epicMap: Record<number, number>, startAt: number) => {
     const maxResults = 50
+    let currentStartAt = startAt
     const jql = `project IN (${process.env.PROJECTS}) ORDER BY createdDate ASC`
-    const currentStartAt = startAt
     let result = await jira.getIssuesForBoard(jiraBoardId, startAt, 1, jql, true)
     const issueMigrateProgress = new SingleBar({ })
     issueMigrateProgress.start(result.total, startAt)
@@ -146,8 +146,8 @@ const migrateIssues = async (jira: JiraApi, octokit: Octokit, jiraBoardId: strin
             await waitForSeconds(8)
         }
 
-        startAt += result.maxResults
-        hasNext = startAt < result.total
+        currentStartAt += result.maxResults
+        hasNext = currentStartAt < result.total
     };
 }
 
