@@ -1,16 +1,36 @@
+import { createAppAuth } from "@octokit/auth-app";
 import { throttling } from "@octokit/plugin-throttling";
 import { Octokit } from "@octokit/rest";
+import { readFileSync } from "fs";
 
 const ThrottledOctokit = Octokit.plugin(throttling)
 
-const octokitClient = () => new ThrottledOctokit({
-    auth: "token " + process.env.GITHUB_ACCESS_TOKEN,
-    throttle: {
+const authenticate = async ({ file, owner, repo }: { file: string, owner: string, repo: string }) => {
+  const appId = 365695
+  const privateKey = readFileSync(file).toString('ascii')
+
+  const octokit = new Octokit({ authStrategy: createAppAuth, auth: { appId, privateKey } })
+  const {
+    data: { id: installationId },
+  } = await octokit.apps.getRepoInstallation({ owner, repo })
+  const {
+    data: { token },
+  } = await octokit.apps.createInstallationAccessToken({ installation_id: installationId })
+  return token
+}
+
+const octokitClient = async (privateKey: string, owner: string, repo: string) =>
+  authenticate({ file: privateKey, owner, repo })
+    .then((token) => new ThrottledOctokit({
+      auth: token,
+      request: { },
+      throttle: {
+        fallbackSecondaryRateRetryAfter: 120,
         onRateLimit: (retryAfter: number, options: any, octokit) => {
           octokit.log.warn(
             `Request quota exhausted for request ${options.method} ${options.url}`,
           );
-    
+
           // Retry twice after hitting a rate limit error, then give up
           if (options.request.retryCount <= 2) {
             console.log(`Retrying after ${retryAfter} seconds!`);
@@ -22,8 +42,12 @@ const octokitClient = () => new ThrottledOctokit({
           octokit.log.warn(
             `Secondary quota detected for request ${options.method} ${options.url}`,
           );
+          if (options.request.retryCount <= 2) {
+            console.log(`Retrying after ${retryAfter} seconds!`);
+            return true; 
+          }
         },
       },
-})
+    }))
 
 export default octokitClient
