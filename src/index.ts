@@ -108,19 +108,25 @@ ${j2m.to_markdown(comment.body)}
 
 const migrateIssues = async (jira: JiraApi, octokit: Octokit, jiraBoardId: string, epicMap: Record<number, number>, startAt: number) => {
     const maxResults = 50
-    let currentStartAt = startAt
     const jql = `project IN (${process.env.PROJECTS}) ORDER BY createdDate ASC`
-    let result = await jira.getIssuesForBoard(jiraBoardId, startAt, 1, jql, true)
     const issueMigrateProgress = new SingleBar({ })
+
+    let currentStartAt = startAt
+    let result = await jira.getIssuesForBoard(jiraBoardId, 0, 1, jql, true)
+
     issueMigrateProgress.start(result.total, startAt)
-    let hasNext = true
-    while (hasNext) {
-        result = await jira.getIssuesForBoard(jiraBoardId, startAt, maxResults, jql, true)
+
+    do {
+        result = await jira.getIssuesForBoard(jiraBoardId, currentStartAt, maxResults, jql, true)
+
         for (let index = 0; index < result.issues.length; index += 1) {
             const issue = result.issues[index]
+
             issueMigrateProgress.update(currentStartAt + index)
             if (issue.fields.issuetype.name === "Epic") { continue }
+
             const assignee = issue.fields.assignee && nameMapping[issue.fields.assignee.displayName] ? nameMapping[issue.fields.assignee.displayName] : undefined
+
             const createdIssue = await octokit.rest.issues.create({
                 owner,
                 repo,
@@ -147,8 +153,7 @@ const migrateIssues = async (jira: JiraApi, octokit: Octokit, jiraBoardId: strin
         }
 
         currentStartAt += result.maxResults
-        hasNext = currentStartAt < result.total
-    };
+    } while (currentStartAt < result.total);
 }
 
 
